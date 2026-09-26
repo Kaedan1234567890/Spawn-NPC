@@ -16,12 +16,10 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.coordinates.Vec3Argument;
 import net.minecraft.network.chat.Component;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.decoration.Mannequin;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.Locale;
@@ -30,18 +28,20 @@ public final class ChillZoneNpcs implements ModInitializer {
     private static final NpcStore STORE = new NpcStore();
     private static final NpcManager MANAGER = new NpcManager(STORE);
     private static int tickCounter;
-
-    private static final SuggestionProvider<CommandSourceStack> PRESETS = (ctx, builder) -> {
-        String typed = builder.getRemainingLowerCase();
-        for (NpcPreset preset : NpcPreset.values()) {
-            if (preset.id().startsWith(typed)) builder.suggest(preset.id());
-        }
-        return builder.buildFuture();
-    };
+    private static int startupTicks;
+    private static boolean runtimeReady;
 
     private static final SuggestionProvider<CommandSourceStack> NPC_IDS = (ctx, builder) -> {
         String typed = builder.getRemainingLowerCase();
         for (String id : STORE.ids()) if (id.startsWith(typed)) builder.suggest(id);
+        return builder.buildFuture();
+    };
+
+    private static final SuggestionProvider<CommandSourceStack> STYLES = (ctx, builder) -> {
+        String typed = builder.getRemainingLowerCase();
+        for (NpcNameStyle style : NpcNameStyle.values()) {
+            if (style.id().startsWith(typed)) builder.suggest(style.id());
+        }
         return builder.buildFuture();
     };
 
@@ -59,8 +59,6 @@ public final class ChillZoneNpcs implements ModInitializer {
             SuggestionsBuilder shifted = builder.createOffset(replaceAt);
             for (Suggestion suggestion : nested.getList()) shifted.suggest(suggestion.getText());
 
-            // Remembered/offline players are also offered as completions. This is deliberately
-            // permissive so custom NPC commands are not limited to currently-online names.
             String token = partial.substring(Math.max(0, nested.getRange().getStart()));
             String lower = token.toLowerCase(Locale.ROOT);
             for (String name : STORE.knownPlayers()) {
@@ -78,19 +76,36 @@ public final class ChillZoneNpcs implements ModInitializer {
         registerCommands();
 
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
-            MANAGER.restoreAll(server);
+            // Wait briefly before restoring so vanilla has time to load any persisted mannequin
+            // entity with the UUID from our JSON. This is part of duplicate prevention.
             tickCounter = 0;
-            System.out.println("[ChillZoneNPCs] Loaded " + STORE.ids().size() + " persistent NPC(s).");
+            startupTicks = 0;
+            runtimeReady = false;
         });
 
-        ServerLifecycleEvents.SERVER_STOPPING.register(server -> STORE.save());
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+            runtimeReady = false;
+            // Our JSON is authoritative. Remove live mannequins before the world finishes
+            // shutting down so they are not also persisted as a second independent copy.
+            MANAGER.removeAllEntities(server);
+            STORE.save();
+        });
 
         ServerPlayConnectionEvents.JOIN.register((listener, sender, server) -> {
             STORE.rememberPlayer(listener.player.getGameProfile().name());
         });
 
         ServerTickEvents.END_SERVER_TICK.register(server -> {
-            // 10 times/second is smooth enough for horizontal look tracking without needless work.
+            if (!runtimeReady) {
+                if (++startupTicks >= 40) {
+                    MANAGER.restoreAll(server);
+                    runtimeReady = true;
+                    tickCounter = 0;
+                    System.out.println("[ChillZoneNPCs] Loaded " + STORE.ids().size() + " persistent NPC(s).");
+                }
+                return;
+            }
+
             if (++tickCounter >= 2) {
                 tickCounter = 0;
                 MANAGER.tick(server);
@@ -117,18 +132,12 @@ public final class ChillZoneNpcs implements ModInitializer {
     }
 
     private static void activate(ServerPlayer player, NpcRecord record) {
-        switch (record.actionType()) {
-            case MESSAGE -> {
-                if (!record.action.isBlank()) player.sendSystemMessage(Component.literal(record.action));
-            }
-            case COMMAND -> {
-                if (record.action.isBlank()) return;
-                // Run as the player who clicked. This makes player-facing commands such as
-                // /shop, /homes and /rtp behave naturally. Vanilla permission checks still apply.
-                // Selectors such as @p are supported by the stored command itself.
-                player.level().getServer().getCommands().performPrefixedCommand(player.createCommandSourceStack(), record.action);
-            }
-            case NONE -> { }
+        if (record.commandAction != null && !record.commandAction.isBlank()) {
+            player.level().getServer().getCommands().performPrefixedCommand(
+                    player.createCommandSourceStack(), record.commandAction);
+        }
+        if (record.messageAction != null && !record.messageAction.isBlank()) {
+            player.sendSystemMessage(Component.literal(record.messageAction));
         }
     }
 
@@ -136,12 +145,10 @@ public final class ChillZoneNpcs implements ModInitializer {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
             var root = Commands.literal("npc").requires(Permissions::canAdmin);
 
+            // Everything is custom now. Example: /npc create shop_main
             root.then(Commands.literal("create")
-                    .then(Commands.argument("preset", StringArgumentType.word()).suggests(PRESETS)
-                            .then(Commands.argument("id", StringArgumentType.word())
-                                    .executes(ctx -> create(ctx.getSource(),
-                                            StringArgumentType.getString(ctx, "preset"),
-                                            StringArgumentType.getString(ctx, "id"))))));
+                    .then(Commands.argument("id", StringArgumentType.word())
+                            .executes(ctx -> create(ctx.getSource(), StringArgumentType.getString(ctx, "id")))));
 
             root.then(Commands.literal("name")
                     .then(Commands.argument("id", StringArgumentType.word()).suggests(NPC_IDS)
@@ -150,24 +157,33 @@ public final class ChillZoneNpcs implements ModInitializer {
                                             StringArgumentType.getString(ctx, "id"),
                                             StringArgumentType.getString(ctx, "name"))))));
 
+            root.then(Commands.literal("style")
+                    .then(Commands.argument("id", StringArgumentType.word()).suggests(NPC_IDS)
+                            .then(Commands.argument("style", StringArgumentType.word()).suggests(STYLES)
+                                    .executes(ctx -> style(ctx.getSource(),
+                                            StringArgumentType.getString(ctx, "id"),
+                                            StringArgumentType.getString(ctx, "style"))))));
+
+            // Command and message are independent. Setting one no longer deletes the other.
             root.then(Commands.literal("action")
                     .then(Commands.argument("id", StringArgumentType.word()).suggests(NPC_IDS)
                             .then(Commands.literal("command")
                                     .then(Commands.argument("command", StringArgumentType.greedyString()).suggests(COMMANDS)
-                                            .executes(ctx -> action(ctx.getSource(),
+                                            .executes(ctx -> commandAction(ctx.getSource(),
                                                     StringArgumentType.getString(ctx, "id"),
-                                                    NpcActionType.COMMAND,
                                                     StringArgumentType.getString(ctx, "command")))))
                             .then(Commands.literal("message")
                                     .then(Commands.argument("message", StringArgumentType.greedyString())
-                                            .executes(ctx -> action(ctx.getSource(),
+                                            .executes(ctx -> messageAction(ctx.getSource(),
                                                     StringArgumentType.getString(ctx, "id"),
-                                                    NpcActionType.MESSAGE,
                                                     StringArgumentType.getString(ctx, "message")))))
                             .then(Commands.literal("clear")
-                                    .executes(ctx -> action(ctx.getSource(),
-                                            StringArgumentType.getString(ctx, "id"),
-                                            NpcActionType.NONE, "")))));
+                                    .then(Commands.literal("command")
+                                            .executes(ctx -> clearAction(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "command")))
+                                    .then(Commands.literal("message")
+                                            .executes(ctx -> clearAction(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "message")))
+                                    .then(Commands.literal("all")
+                                            .executes(ctx -> clearAction(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "all"))))));
 
             root.then(Commands.literal("enable")
                     .then(Commands.argument("id", StringArgumentType.word()).suggests(NPC_IDS)
@@ -207,15 +223,7 @@ public final class ChillZoneNpcs implements ModInitializer {
         });
     }
 
-    private static int create(CommandSourceStack source, String presetRaw, String idRaw) {
-        NpcPreset preset;
-        try {
-            preset = NpcPreset.fromId(presetRaw);
-        } catch (IllegalArgumentException e) {
-            source.sendFailure(Component.literal("Unknown preset. Use shop, homes, rtp, baltop, help, or custom."));
-            return 0;
-        }
-
+    private static int create(CommandSourceStack source, String idRaw) {
         String id = NpcStore.normalize(idRaw);
         if (STORE.get(id) != null) {
             source.sendFailure(Component.literal("An NPC with ID '" + id + "' already exists."));
@@ -228,19 +236,29 @@ public final class ChillZoneNpcs implements ModInitializer {
 
         NpcRecord record = new NpcRecord();
         record.id = id;
-        record.preset = preset.id();
-        record.displayName = preset.displayName();
+        record.displayName = humanize(id);
         record.dimension = level.dimension().identifier().toString();
         record.x = pos.x;
         record.y = pos.y;
         record.z = pos.z;
         record.yaw = yaw;
-        record.actionType = preset.actionType().name();
-        record.action = preset.action();
+        record.preset = "custom";
         STORE.put(record);
         MANAGER.ensureSpawned(source.getServer(), record);
-        source.sendSuccess(() -> Component.literal("Created NPC '" + id + "' (" + preset.id() + ")."), false);
+        source.sendSuccess(() -> Component.literal("Created custom NPC '" + id + "'."), false);
         return 1;
+    }
+
+    private static String humanize(String id) {
+        String[] words = id.replace('-', '_').split("_");
+        StringBuilder out = new StringBuilder();
+        for (String word : words) {
+            if (word.isBlank()) continue;
+            if (!out.isEmpty()) out.append(' ');
+            out.append(Character.toUpperCase(word.charAt(0)));
+            if (word.length() > 1) out.append(word.substring(1));
+        }
+        return out.isEmpty() ? "NPC" : out.toString();
     }
 
     private static int rename(CommandSourceStack source, String id, String name) {
@@ -253,13 +271,50 @@ public final class ChillZoneNpcs implements ModInitializer {
         return 1;
     }
 
-    private static int action(CommandSourceStack source, String id, NpcActionType type, String value) {
+    private static int style(CommandSourceStack source, String id, String styleRaw) {
         NpcRecord record = require(source, id);
         if (record == null) return 0;
-        record.actionType = type.name();
-        record.action = value.startsWith("/") ? value.substring(1) : value;
+        NpcNameStyle chosen = null;
+        for (NpcNameStyle style : NpcNameStyle.values()) {
+            if (style.id().equalsIgnoreCase(styleRaw)) chosen = style;
+        }
+        if (chosen == null) {
+            source.sendFailure(Component.literal("Unknown style. Use default, gold, yellow, aqua, green, red, purple, gray, or white."));
+            return 0;
+        }
+        record.nameStyle = chosen.id();
         STORE.put(record);
-        source.sendSuccess(() -> Component.literal("Updated action for NPC '" + record.id + "'."), false);
+        MANAGER.refresh(source.getServer(), record);
+        NpcNameStyle finalChosen = chosen;
+        source.sendSuccess(() -> Component.literal("NPC '" + record.id + "' name style is now " + finalChosen.id() + "."), false);
+        return 1;
+    }
+
+    private static int commandAction(CommandSourceStack source, String id, String value) {
+        NpcRecord record = require(source, id);
+        if (record == null) return 0;
+        record.commandAction = value.startsWith("/") ? value.substring(1) : value;
+        STORE.put(record);
+        source.sendSuccess(() -> Component.literal("Updated command action for NPC '" + record.id + "'."), false);
+        return 1;
+    }
+
+    private static int messageAction(CommandSourceStack source, String id, String value) {
+        NpcRecord record = require(source, id);
+        if (record == null) return 0;
+        record.messageAction = value;
+        STORE.put(record);
+        source.sendSuccess(() -> Component.literal("Updated message action for NPC '" + record.id + "'."), false);
+        return 1;
+    }
+
+    private static int clearAction(CommandSourceStack source, String id, String what) {
+        NpcRecord record = require(source, id);
+        if (record == null) return 0;
+        if (what.equals("command") || what.equals("all")) record.commandAction = "";
+        if (what.equals("message") || what.equals("all")) record.messageAction = "";
+        STORE.put(record);
+        source.sendSuccess(() -> Component.literal("Cleared " + what + " action(s) for NPC '" + record.id + "'."), false);
         return 1;
     }
 
@@ -277,8 +332,11 @@ public final class ChillZoneNpcs implements ModInitializer {
         if (record == null) return 0;
         record.lookAtPlayers = on;
         if (!on) {
-            Entity entity = MANAGER.findLevel(source.getServer(), record.dimension).getEntity(record.entityUuid());
-            if (entity != null) record.yaw = entity.getYRot();
+            ServerLevel level = MANAGER.findLevel(source.getServer(), record.dimension);
+            if (level != null && record.entityUuid() != null) {
+                Entity entity = level.getEntity(record.entityUuid());
+                if (entity != null) record.yaw = entity.getYRot();
+            }
         }
         STORE.put(record);
         source.sendSuccess(() -> Component.literal("NPC '" + record.id + "' look tracking is " + (on ? "ON" : "OFF") + "."), false);
@@ -326,11 +384,13 @@ public final class ChillZoneNpcs implements ModInitializer {
         NpcRecord record = require(source, id);
         if (record == null) return 0;
         source.sendSuccess(() -> Component.literal(
-                "NPC " + record.id + " | name=" + record.displayName
-                        + " | preset=" + record.preset
+                "NPC " + record.id
+                        + " | name=" + record.displayName
+                        + " | style=" + record.nameStyle
                         + " | enabled=" + record.enabled
                         + " | look=" + record.lookAtPlayers
-                        + " | action=" + record.actionType + ":" + record.action), false);
+                        + " | command=" + (record.commandAction == null || record.commandAction.isBlank() ? "none" : record.commandAction)
+                        + " | message=" + (record.messageAction == null || record.messageAction.isBlank() ? "none" : record.messageAction)), false);
         return 1;
     }
 

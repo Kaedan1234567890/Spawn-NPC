@@ -42,6 +42,15 @@ public final class NpcStore {
             }
             if (state.npcs == null) state.npcs = new LinkedHashMap<>();
             if (state.knownPlayers == null) state.knownPlayers = new LinkedHashSet<>();
+
+            boolean migrated = false;
+            for (NpcRecord record : state.npcs.values()) {
+                if (record.commandAction == null) record.commandAction = "";
+                if (record.messageAction == null) record.messageAction = "";
+                if (record.nameStyle == null || record.nameStyle.isBlank()) record.nameStyle = "gold";
+                migrated |= record.migrateLegacyAction();
+            }
+            if (migrated) save();
         } catch (Exception e) {
             System.err.println("[ChillZoneNPCs] Failed to load NPC data: " + e.getMessage());
             state = new State();

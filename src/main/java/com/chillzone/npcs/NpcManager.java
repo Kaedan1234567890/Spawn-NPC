@@ -1,12 +1,12 @@
 package com.chillzone.npcs;
 
-import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.decoration.Mannequin;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import java.lang.reflect.Method;
@@ -38,6 +38,25 @@ public final class NpcManager {
             }
         }
 
+        // Recovery path for a clean restart where vanilla saved the mannequin before our
+        // shutdown callback discarded it. Adopt the matching mannequin at the stored position
+        // instead of spawning a second copy, and remove any extra duplicates found there.
+        AABB box = new AABB(record.x - 0.35, record.y - 0.35, record.z - 0.35,
+                record.x + 0.35, record.y + 2.2, record.z + 0.35);
+        java.util.List<Mannequin> nearby = level.getEntitiesOfClass(Mannequin.class, box, candidate -> {
+            if (candidate.isRemoved()) return false;
+            if (candidate.getCustomName() == null) return false;
+            return candidate.getCustomName().getString().equals(record.displayName);
+        });
+        if (!nearby.isEmpty()) {
+            Mannequin adopted = nearby.getFirst();
+            for (int i = 1; i < nearby.size(); i++) nearby.get(i).discard();
+            record.entityUuid = adopted.getUUID().toString();
+            store.put(record);
+            applyProperties(adopted, record);
+            return adopted;
+        }
+
         Mannequin mannequin = new Mannequin(EntityTypes.MANNEQUIN, level);
         mannequin.setPos(record.x, record.y, record.z);
         mannequin.setYRot(record.yaw);
@@ -50,7 +69,7 @@ public final class NpcManager {
     }
 
     public void applyProperties(Mannequin mannequin, NpcRecord record) {
-        mannequin.setCustomName(Component.literal(record.displayName));
+        mannequin.setCustomName(NpcNameStyle.fromId(record.nameStyle).format(record.displayName));
         mannequin.setCustomNameVisible(true);
         mannequin.setInvulnerable(true);
         mannequin.setNoGravity(true);
@@ -58,6 +77,7 @@ public final class NpcManager {
         mannequin.setDeltaMovement(Vec3.ZERO);
         mannequin.setXRot(0.0F);
         trySetImmovable(mannequin);
+        tryHideDefaultDescription(mannequin);
     }
 
     private void trySetImmovable(Mannequin mannequin) {
@@ -66,14 +86,26 @@ public final class NpcManager {
             method.setAccessible(true);
             method.invoke(mannequin, true);
         } catch (ReflectiveOperationException ignored) {
-            // 26.2 currently has this field/method. Position locking below is a fallback.
+            // Position locking in tick() remains the fallback.
+        }
+    }
+
+    private void tryHideDefaultDescription(Mannequin mannequin) {
+        // Vanilla mannequins display a second "NPC"/description line. Hide it so Chill Zone
+        // controls the visible label cleanly. Reflection keeps this resilient to mapping visibility.
+        try {
+            Method method = Mannequin.class.getDeclaredMethod("setHideDescription", boolean.class);
+            method.setAccessible(true);
+            method.invoke(mannequin, true);
+        } catch (ReflectiveOperationException ignored) {
+            // If Mojang changes the private method, the NPC still functions; only that line may show.
         }
     }
 
     public boolean removeEntity(MinecraftServer server, NpcRecord record) {
+        UUID uuid = record.entityUuid();
+        if (uuid == null) return false;
         for (ServerLevel level : server.getAllLevels()) {
-            UUID uuid = record.entityUuid();
-            if (uuid == null) return false;
             Entity entity = level.getEntity(uuid);
             if (entity != null) {
                 entity.discard();
@@ -81,6 +113,17 @@ public final class NpcManager {
             }
         }
         return false;
+    }
+
+    public void removeAllEntities(MinecraftServer server) {
+        // Stored NPC records remain intact; only live mannequin entities are discarded.
+        // They are recreated from JSON after the next startup. This prevents vanilla world
+        // persistence plus our own persistence from creating duplicates after a clean restart.
+        for (NpcRecord record : store.all()) {
+            removeEntity(server, record);
+            record.entityUuid = null;
+            store.put(record);
+        }
     }
 
     public void refresh(MinecraftServer server, NpcRecord record) {
@@ -95,7 +138,6 @@ public final class NpcManager {
             Mannequin mannequin = ensureSpawned(server, record);
             if (mannequin == null) continue;
 
-            // Hard position lock: NPCs cannot be pushed, wander, fall, or drift.
             mannequin.setDeltaMovement(Vec3.ZERO);
             if (mannequin.getX() != record.x || mannequin.getY() != record.y || mannequin.getZ() != record.z) {
                 mannequin.setPos(record.x, record.y, record.z);

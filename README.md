@@ -1,29 +1,41 @@
-# Chill Zone NPCs 0.1.1-alpha
+# Chill Zone NPCs 0.2.0-alpha
 
-Persistent server-side mannequin NPCs for Minecraft Java 26.2 / Fabric.
+Server-side Fabric 26.2 NPC system for the Chill Zone SMP.
 
-## Goals in this first build
-- `/npc` administration is OP-only on dedicated servers.
-- Single-player/integrated worlds allow the world owner to test commands.
-- NPCs use vanilla mannequins: no client mod or custom packets.
-- NPC definitions persist in `config/chillzone-npcs/npcs.json` and automatically restore after restart.
-- NPCs are invulnerable, gravity-free, attack-blocked, and position-locked.
-- Optional horizontal-only look tracking follows the nearest player without looking up/down.
-- Right-click actions can run a player command or send a custom message.
-- Presets: `shop`, `homes`, `rtp`, `baltop`, `help`, `custom`.
-- Command action entry uses the server command dispatcher for tab suggestions and also remembers offline player names seen by the server.
+## What changed from 0.1.1
+
+- Removed the preset NPC system. Every NPC is now custom.
+- `/npc create <id>` creates a custom NPC using the ID you choose.
+- NPCs can now have BOTH a command action and a message action at the same time.
+- Added `/npc style <id> <style>` for cleaner coloured/bold nameplates.
+- Hides the vanilla mannequin `NPC` description line so only the Chill Zone display name shows.
+- Added duplicate prevention for leave/rejoin and normal server restarts:
+  - restoration waits briefly for persisted entities to load;
+  - an existing matching mannequin at the stored position is adopted instead of duplicated;
+  - duplicate copies found at the same stored position are removed;
+  - live NPC entities are discarded on clean shutdown while the JSON records remain authoritative.
+- Existing 0.1.x NPC data migrates automatically, including old single command/message actions.
 
 ## Commands
-```
-/npc create <shop|homes|rtp|baltop|help|custom> <id>
+
+All `/npc` administration remains OP-only on a dedicated server. Single-player creative testing remains supported through the existing permission helper.
+
+```text
+/npc create <id>
 /npc name <id> <display name>
+/npc style <id> <default|gold|yellow|aqua|green|red|purple|gray|white>
+
 /npc action <id> command <command>
 /npc action <id> message <message>
-/npc action <id> clear
+/npc action <id> clear command
+/npc action <id> clear message
+/npc action <id> clear all
+
 /npc enable <id>
 /npc disable <id>
 /npc look <id> on
 /npc look <id> off
+
 /npc move <id>
 /npc move <id> <x> <y> <z>
 /npc remove <id>
@@ -32,25 +44,20 @@ Persistent server-side mannequin NPCs for Minecraft Java 26.2 / Fabric.
 /npc list
 ```
 
-## Example
-```
-/npc create shop shop_main
+### Example
+
+```text
+/npc create shop_main
 /npc name shop_main Shard Shop
-/npc look shop_main on
+/npc style shop_main gold
+/npc action shop_main command shop
+/npc action shop_main message Welcome to the Shard Shop!
 ```
 
-`shop` already has the action `shop`. A custom NPC can be configured like:
-```
-/npc create custom info_1
-/npc name info_1 Server Information
-/npc action info_1 message Welcome to Chill Zone SMP!
-```
+Right-clicking that NPC runs `/shop` as the clicking player and also sends that player the custom message.
 
-Command actions execute as the player who right-clicked the NPC, so normal command permissions still apply. This is intentional: a custom NPC does not silently give regular players OP permissions. Selectors such as `@p` can still be entered in the stored command where the command itself permits them.
+## Appearance note
 
-## Crossplay
-The mod is entirely server-side and uses a vanilla mannequin plus vanilla interaction/command handling. Java clients do not need the mod. Bedrock clients are expected to use the server's normal Geyser/Floodgate bridge; there is no Bedrock-specific client install for this mod.
+This build improves nameplate presentation and removes the vanilla `NPC` line. It does not yet attempt per-viewer dynamic skins. A single vanilla mannequin normally has one profile that every viewer receives. Making one Java player see their own skin while another viewer simultaneously sees a different skin requires per-viewer packet/entity handling and is not something to fake into the server-side crossplay build without testing it carefully with Geyser/Bedrock.
 
-
-## 0.1.1-alpha build fix
-- Fixed Minecraft 26.2 ServerPlayer server access by using `player.level().getServer()` when executing NPC command actions.
+A safer future skin feature is a configurable fixed player skin per NPC (for example `/npc skin shop_main SomePlayer`) if desired.
