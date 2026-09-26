@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "chillzonenpcs",
+  "version": "${version}",
+  "name": "Chill Zone NPCs",
+  "description": "Persistent, immortal, operator-managed mannequin NPCs with configurable commands/messages for Chill Zone SMP.",
+  "authors": ["Chill Zone SMP"],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["com.chillzone.npcs.ChillZoneNpcs"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.0",
+    "minecraft": "26.2",
+    "fabric-api": "*"
+  }
+}
