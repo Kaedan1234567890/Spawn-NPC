@@ -126,7 +126,7 @@ public final class ChillZoneNpcs implements ModInitializer {
                 // Run as the player who clicked. This makes player-facing commands such as
                 // /shop, /homes and /rtp behave naturally. Vanilla permission checks still apply.
                 // Selectors such as @p are supported by the stored command itself.
-                player.getServer().getCommands().performPrefixedCommand(player.createCommandSourceStack(), record.action);
+                player.level().getServer().getCommands().performPrefixedCommand(player.createCommandSourceStack(), record.action);
             }
             case NONE -> { }
         }

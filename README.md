@@ -1,4 +1,4 @@
-# Chill Zone NPCs 0.1.0-alpha
+# Chill Zone NPCs 0.1.1-alpha
 
 Persistent server-side mannequin NPCs for Minecraft Java 26.2 / Fabric.
 
@@ -50,3 +50,7 @@ Command actions execute as the player who right-clicked the NPC, so normal comma
 
 ## Crossplay
 The mod is entirely server-side and uses a vanilla mannequin plus vanilla interaction/command handling. Java clients do not need the mod. Bedrock clients are expected to use the server's normal Geyser/Floodgate bridge; there is no Bedrock-specific client install for this mod.
+
+
+## 0.1.1-alpha build fix
+- Fixed Minecraft 26.2 ServerPlayer server access by using `player.level().getServer()` when executing NPC command actions.
