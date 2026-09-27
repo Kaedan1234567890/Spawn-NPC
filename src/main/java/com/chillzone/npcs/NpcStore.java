@@ -48,6 +48,10 @@ public final class NpcStore {
                 if (record.commandAction == null) record.commandAction = "";
                 if (record.messageAction == null) record.messageAction = "";
                 if (record.nameStyle == null || record.nameStyle.isBlank()) record.nameStyle = "gold";
+                if (record.nameFormat == null || record.nameFormat.isBlank()) record.nameFormat = "bold";
+                if (record.skinPlayer == null) record.skinPlayer = "";
+                if (record.messageColor == null || record.messageColor.isBlank()) record.messageColor = "white";
+                if (record.messageFormat == null || record.messageFormat.isBlank()) record.messageFormat = "default";
                 migrated |= record.migrateLegacyAction();
             }
             if (migrated) save();

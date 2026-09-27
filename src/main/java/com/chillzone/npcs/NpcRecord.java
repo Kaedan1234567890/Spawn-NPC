@@ -6,6 +6,8 @@ public final class NpcRecord {
     public String id;
     public String displayName = "NPC";
     public String nameStyle = "gold";
+    public String nameFormat = "bold";
+    public String skinPlayer = "";
     public String dimension = "minecraft:overworld";
     public double x;
     public double y;
@@ -17,6 +19,8 @@ public final class NpcRecord {
     // NPCs can have BOTH a command action and a message action.
     public String commandAction = "";
     public String messageAction = "";
+    public String messageColor = "white";
+    public String messageFormat = "default";
 
     // Legacy 0.1.x fields are kept only so old npcs.json files migrate automatically.
     public String preset = "custom";

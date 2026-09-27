@@ -2,6 +2,7 @@ package com.chillzone.npcs;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 
 import java.util.Locale;
 
@@ -18,23 +19,30 @@ public enum NpcNameStyle {
 
     private final String id;
     private final ChatFormatting color;
-    private final boolean bold;
+    private final boolean legacyBold;
 
-    NpcNameStyle(String id, ChatFormatting color, boolean bold) {
+    NpcNameStyle(String id, ChatFormatting color, boolean legacyBold) {
         this.id = id;
         this.color = color;
-        this.bold = bold;
+        this.legacyBold = legacyBold;
     }
 
     public String id() { return id; }
 
     public Component format(String text) {
-        return bold
-                ? Component.literal(text).withStyle(color, ChatFormatting.BOLD)
-                : Component.literal(text).withStyle(color);
+        return format(text, null);
+    }
+
+    public Component format(String text, String formatId) {
+        MutableComponent component = Component.literal(text).withStyle(color);
+        if (formatId == null || formatId.isBlank()) {
+            return legacyBold ? component.withStyle(ChatFormatting.BOLD) : component;
+        }
+        return NpcTextFormat.fromId(formatId).apply(component);
     }
 
     public static NpcNameStyle fromId(String raw) {
+        if (raw == null) return GOLD;
         String value = raw.toLowerCase(Locale.ROOT);
         for (NpcNameStyle style : values()) if (style.id.equals(value)) return style;
         return GOLD;

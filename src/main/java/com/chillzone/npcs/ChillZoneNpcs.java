@@ -45,6 +45,34 @@ public final class ChillZoneNpcs implements ModInitializer {
         return builder.buildFuture();
     };
 
+    private static final SuggestionProvider<CommandSourceStack> COLORS = (ctx, builder) -> {
+        String typed = builder.getRemainingLowerCase();
+        for (NpcColor color : NpcColor.values()) {
+            if (color.id().startsWith(typed)) builder.suggest(color.id());
+        }
+        return builder.buildFuture();
+    };
+
+    private static final SuggestionProvider<CommandSourceStack> TEXT_FORMATS = (ctx, builder) -> {
+        String typed = builder.getRemainingLowerCase();
+        for (NpcTextFormat format : NpcTextFormat.values()) {
+            if (format.id().startsWith(typed)) builder.suggest(format.id());
+        }
+        return builder.buildFuture();
+    };
+
+    private static final SuggestionProvider<CommandSourceStack> PLAYER_NAMES = (ctx, builder) -> {
+        String typed = builder.getRemainingLowerCase();
+        for (String name : STORE.knownPlayers()) {
+            if (name.toLowerCase(Locale.ROOT).startsWith(typed)) builder.suggest(name);
+        }
+        for (ServerPlayer player : ctx.getSource().getServer().getPlayerList().getPlayers()) {
+            String name = player.getGameProfile().name();
+            if (name.toLowerCase(Locale.ROOT).startsWith(typed)) builder.suggest(name);
+        }
+        return builder.buildFuture();
+    };
+
     private static final SuggestionProvider<CommandSourceStack> COMMANDS = (ctx, builder) -> {
         String input = ctx.getInput();
         int marker = input.lastIndexOf(" command ");
@@ -137,7 +165,8 @@ public final class ChillZoneNpcs implements ModInitializer {
                     player.createCommandSourceStack(), record.commandAction);
         }
         if (record.messageAction != null && !record.messageAction.isBlank()) {
-            player.sendSystemMessage(Component.literal(record.messageAction));
+            player.sendSystemMessage(NpcTextFormat.fromId(record.messageFormat).apply(
+                    Component.literal(record.messageAction).withStyle(NpcColor.fromId(record.messageColor).formatting())));
         }
     }
 
@@ -164,6 +193,13 @@ public final class ChillZoneNpcs implements ModInitializer {
                                             StringArgumentType.getString(ctx, "id"),
                                             StringArgumentType.getString(ctx, "style"))))));
 
+            root.then(Commands.literal("nameformat")
+                    .then(Commands.argument("id", StringArgumentType.word()).suggests(NPC_IDS)
+                            .then(Commands.argument("format", StringArgumentType.word()).suggests(TEXT_FORMATS)
+                                    .executes(ctx -> nameFormat(ctx.getSource(),
+                                            StringArgumentType.getString(ctx, "id"),
+                                            StringArgumentType.getString(ctx, "format"))))));
+
             // Command and message are independent. Setting one no longer deletes the other.
             root.then(Commands.literal("action")
                     .then(Commands.argument("id", StringArgumentType.word()).suggests(NPC_IDS)
@@ -177,6 +213,16 @@ public final class ChillZoneNpcs implements ModInitializer {
                                             .executes(ctx -> messageAction(ctx.getSource(),
                                                     StringArgumentType.getString(ctx, "id"),
                                                     StringArgumentType.getString(ctx, "message")))))
+                            .then(Commands.literal("messagecolor")
+                                    .then(Commands.argument("color", StringArgumentType.word()).suggests(COLORS)
+                                            .executes(ctx -> messageColor(ctx.getSource(),
+                                                    StringArgumentType.getString(ctx, "id"),
+                                                    StringArgumentType.getString(ctx, "color")))))
+                            .then(Commands.literal("messageformat")
+                                    .then(Commands.argument("format", StringArgumentType.word()).suggests(TEXT_FORMATS)
+                                            .executes(ctx -> messageFormat(ctx.getSource(),
+                                                    StringArgumentType.getString(ctx, "id"),
+                                                    StringArgumentType.getString(ctx, "format")))))
                             .then(Commands.literal("clear")
                                     .then(Commands.literal("command")
                                             .executes(ctx -> clearAction(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "command")))
@@ -184,6 +230,15 @@ public final class ChillZoneNpcs implements ModInitializer {
                                             .executes(ctx -> clearAction(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "message")))
                                     .then(Commands.literal("all")
                                             .executes(ctx -> clearAction(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "all"))))));
+
+            root.then(Commands.literal("skin")
+                    .then(Commands.argument("id", StringArgumentType.word()).suggests(NPC_IDS)
+                            .then(Commands.argument("player", StringArgumentType.word()).suggests(PLAYER_NAMES)
+                                    .executes(ctx -> skin(ctx.getSource(),
+                                            StringArgumentType.getString(ctx, "id"),
+                                            StringArgumentType.getString(ctx, "player"))))
+                            .then(Commands.literal("clear")
+                                    .executes(ctx -> skin(ctx.getSource(), StringArgumentType.getString(ctx, "id"), "")))));
 
             root.then(Commands.literal("enable")
                     .then(Commands.argument("id", StringArgumentType.word()).suggests(NPC_IDS)
@@ -193,6 +248,11 @@ public final class ChillZoneNpcs implements ModInitializer {
                             .executes(ctx -> enabled(ctx.getSource(), StringArgumentType.getString(ctx, "id"), false))));
 
             root.then(Commands.literal("look")
+                    .then(Commands.argument("id", StringArgumentType.word()).suggests(NPC_IDS)
+                            .then(Commands.literal("on").executes(ctx -> look(ctx.getSource(), StringArgumentType.getString(ctx, "id"), true)))
+                            .then(Commands.literal("off").executes(ctx -> look(ctx.getSource(), StringArgumentType.getString(ctx, "id"), false)))));
+
+            root.then(Commands.literal("tracking")
                     .then(Commands.argument("id", StringArgumentType.word()).suggests(NPC_IDS)
                             .then(Commands.literal("on").executes(ctx -> look(ctx.getSource(), StringArgumentType.getString(ctx, "id"), true)))
                             .then(Commands.literal("off").executes(ctx -> look(ctx.getSource(), StringArgumentType.getString(ctx, "id"), false)))));
@@ -287,6 +347,75 @@ public final class ChillZoneNpcs implements ModInitializer {
         MANAGER.refresh(source.getServer(), record);
         NpcNameStyle finalChosen = chosen;
         source.sendSuccess(() -> Component.literal("NPC '" + record.id + "' name style is now " + finalChosen.id() + "."), false);
+        return 1;
+    }
+
+    private static int nameFormat(CommandSourceStack source, String id, String formatRaw) {
+        NpcRecord record = require(source, id);
+        if (record == null) return 0;
+        NpcTextFormat chosen = null;
+        for (NpcTextFormat format : NpcTextFormat.values()) {
+            if (format.id().equalsIgnoreCase(formatRaw)) chosen = format;
+        }
+        if (chosen == null) {
+            source.sendFailure(Component.literal("Unknown format. Use default, bold, italic, underline, bold_italic, or bold_underline."));
+            return 0;
+        }
+        record.nameFormat = chosen.id();
+        STORE.put(record);
+        MANAGER.refresh(source.getServer(), record);
+        NpcTextFormat finalChosen = chosen;
+        source.sendSuccess(() -> Component.literal("NPC '" + record.id + "' name format is now " + finalChosen.id() + "."), false);
+        return 1;
+    }
+
+    private static int skin(CommandSourceStack source, String id, String playerName) {
+        NpcRecord record = require(source, id);
+        if (record == null) return 0;
+        record.skinPlayer = playerName == null ? "" : playerName.trim();
+        STORE.put(record);
+        MANAGER.refresh(source.getServer(), record);
+        if (record.skinPlayer.isBlank()) {
+            source.sendSuccess(() -> Component.literal("Cleared custom skin for NPC '" + record.id + "'."), false);
+        } else {
+            source.sendSuccess(() -> Component.literal("NPC '" + record.id + "' will use the skin for '" + record.skinPlayer + "'."), false);
+        }
+        return 1;
+    }
+
+    private static int messageColor(CommandSourceStack source, String id, String colorRaw) {
+        NpcRecord record = require(source, id);
+        if (record == null) return 0;
+        NpcColor chosen = null;
+        for (NpcColor color : NpcColor.values()) {
+            if (color.id().equalsIgnoreCase(colorRaw)) chosen = color;
+        }
+        if (chosen == null) {
+            source.sendFailure(Component.literal("Unknown message color."));
+            return 0;
+        }
+        record.messageColor = chosen.id();
+        STORE.put(record);
+        NpcColor finalChosen = chosen;
+        source.sendSuccess(() -> Component.literal("NPC '" + record.id + "' message color is now " + finalChosen.id() + "."), false);
+        return 1;
+    }
+
+    private static int messageFormat(CommandSourceStack source, String id, String formatRaw) {
+        NpcRecord record = require(source, id);
+        if (record == null) return 0;
+        NpcTextFormat chosen = null;
+        for (NpcTextFormat format : NpcTextFormat.values()) {
+            if (format.id().equalsIgnoreCase(formatRaw)) chosen = format;
+        }
+        if (chosen == null) {
+            source.sendFailure(Component.literal("Unknown message format."));
+            return 0;
+        }
+        record.messageFormat = chosen.id();
+        STORE.put(record);
+        NpcTextFormat finalChosen = chosen;
+        source.sendSuccess(() -> Component.literal("NPC '" + record.id + "' message format is now " + finalChosen.id() + "."), false);
         return 1;
     }
 
@@ -387,10 +516,13 @@ public final class ChillZoneNpcs implements ModInitializer {
                 "NPC " + record.id
                         + " | name=" + record.displayName
                         + " | style=" + record.nameStyle
+                        + "/" + record.nameFormat
+                        + " | skin=" + (record.skinPlayer == null || record.skinPlayer.isBlank() ? "default" : record.skinPlayer)
                         + " | enabled=" + record.enabled
                         + " | look=" + record.lookAtPlayers
                         + " | command=" + (record.commandAction == null || record.commandAction.isBlank() ? "none" : record.commandAction)
-                        + " | message=" + (record.messageAction == null || record.messageAction.isBlank() ? "none" : record.messageAction)), false);
+                        + " | message=" + (record.messageAction == null || record.messageAction.isBlank() ? "none" : record.messageAction)
+                        + " | messageStyle=" + record.messageColor + "/" + record.messageFormat), false);
         return 1;
     }
 

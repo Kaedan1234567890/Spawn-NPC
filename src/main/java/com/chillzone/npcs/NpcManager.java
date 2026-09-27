@@ -8,6 +8,7 @@ import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.decoration.Mannequin;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.item.component.ResolvableProfile;
 
 import java.lang.reflect.Method;
 import java.util.Comparator;
@@ -69,7 +70,7 @@ public final class NpcManager {
     }
 
     public void applyProperties(Mannequin mannequin, NpcRecord record) {
-        mannequin.setCustomName(NpcNameStyle.fromId(record.nameStyle).format(record.displayName));
+        mannequin.setCustomName(NpcNameStyle.fromId(record.nameStyle).format(record.displayName, record.nameFormat));
         mannequin.setCustomNameVisible(true);
         mannequin.setInvulnerable(true);
         mannequin.setNoGravity(true);
@@ -78,6 +79,7 @@ public final class NpcManager {
         mannequin.setXRot(0.0F);
         trySetImmovable(mannequin);
         tryHideDefaultDescription(mannequin);
+        tryApplySkin(mannequin, record);
     }
 
     private void trySetImmovable(Mannequin mannequin) {
@@ -99,6 +101,27 @@ public final class NpcManager {
             method.invoke(mannequin, true);
         } catch (ReflectiveOperationException ignored) {
             // If Mojang changes the private method, the NPC still functions; only that line may show.
+        }
+    }
+
+
+    private void tryApplySkin(Mannequin mannequin, NpcRecord record) {
+        try {
+            Object profile;
+            if (record.skinPlayer == null || record.skinPlayer.isBlank()) {
+                var defaultField = Mannequin.class.getDeclaredField("DEFAULT_PROFILE");
+                defaultField.setAccessible(true);
+                profile = defaultField.get(null);
+            } else {
+                Method create = ResolvableProfile.class.getDeclaredMethod("createUnresolved", String.class);
+                create.setAccessible(true);
+                profile = create.invoke(null, record.skinPlayer);
+            }
+            Method setProfile = Mannequin.class.getDeclaredMethod("setProfile", ResolvableProfile.class);
+            setProfile.setAccessible(true);
+            setProfile.invoke(mannequin, profile);
+        } catch (ReflectiveOperationException ignored) {
+            // NPC remains usable if Mojang changes the internal profile method.
         }
     }
 
