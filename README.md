@@ -35,3 +35,9 @@ Server-side Fabric NPC system for Minecraft 26.2.
 ```
 
 The mod intentionally uses Minecraft's normal font. True custom typefaces require client resource-pack assets and are not guaranteed to render the same way through Bedrock/Geyser; color and formatting remain server-side/crossplay-friendly.
+
+## 0.2.2-alpha-mc26.3
+- Updated build target from Minecraft 26.2 to 26.3.
+- Updated Fabric Loader/API and Gradle/Loom toolchain for 26.3.
+- No NPC commands, skins, persistence, interaction behavior, or GUI behavior were intentionally changed.
+
