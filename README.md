@@ -46,3 +46,8 @@ The mod intentionally uses Minecraft's normal font. True custom typefaces requir
 ## 0.2.3 MC26.3 build fix
 - Replaced Loom 1.18-SNAPSHOT with stable Loom 1.17.21 for Gradle 9.6.0 compatibility.
 - No NPC gameplay/skin/right-click behavior changed.
+
+
+## 0.2.4 Minecraft 26.3 invulnerability fix
+- Replaced removed `Mannequin#setInvulnerable(true)` call with the Minecraft 26.3 `setPermanentlyInvulnerable(true)` API.
+- No NPC behavior was intentionally changed.

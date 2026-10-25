@@ -72,7 +72,7 @@ public final class NpcManager {
     public void applyProperties(Mannequin mannequin, NpcRecord record) {
         mannequin.setCustomName(NpcNameStyle.fromId(record.nameStyle).format(record.displayName, record.nameFormat));
         mannequin.setCustomNameVisible(true);
-        mannequin.setInvulnerable(true);
+        mannequin.setPermanentlyInvulnerable(true);
         mannequin.setNoGravity(true);
         mannequin.setSilent(true);
         mannequin.setDeltaMovement(Vec3.ZERO);
