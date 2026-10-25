@@ -41,3 +41,8 @@ The mod intentionally uses Minecraft's normal font. True custom typefaces requir
 - Updated Fabric Loader/API and Gradle/Loom toolchain for 26.3.
 - No NPC commands, skins, persistence, interaction behavior, or GUI behavior were intentionally changed.
 
+
+
+## 0.2.3 MC26.3 build fix
+- Replaced Loom 1.18-SNAPSHOT with stable Loom 1.17.21 for Gradle 9.6.0 compatibility.
+- No NPC gameplay/skin/right-click behavior changed.
